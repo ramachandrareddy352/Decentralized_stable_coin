@@ -52,6 +52,11 @@ contract DSCEngine is ReentrancyGuard {
     mapping(address user => mapping(address collateralToken => uint256 amount)) private s_collateralDeposited;
     // Amount of DSC minted by user
     mapping(address user => uint256 amount) private s_DSCMinted;
+    // Amount of DSC burned by user
+    mapping(address user => uint256 amount) private s_DSCBurned;
+    // address of all users who get the DSC tokens by transfering
+    mapping(address user => uint256 amount) private s_transferedBySender;
+    mapping(address user => uint256 amount) private s_receivedByReceiver;
     // token collateral(weth/wbtc) coins addresses
     address[] private s_collateralTokens;
     // address of all users
@@ -131,7 +136,7 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(amountCollateral)
     {
         // for burning the healthFactor is reduced then we can redeem the tokens
-        _burnDsc(amountDscToBurn, msg.sender, msg.sender);
+        _burnDsc(amountDscToBurn, msg.sender);
         // if we burn the dsc tokens then the health factor is increased and we can get more collateral without breaking the health factor
         _redeemCollateral(tokenCollateralAddress, amountCollateral, msg.sender, msg.sender);
     }
@@ -169,18 +174,18 @@ contract DSCEngine is ReentrancyGuard {
     /* ---------------------------- BurnDSC Functions ---------------------------- */
 
     function burnDsc(uint256 amount) public moreThanZero(amount) {
-        _burnDsc(amount, msg.sender, msg.sender);
+        _burnDsc(amount, msg.sender);
     }
 
-    function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {
+    function _burnDsc(uint256 amountDscToBurn, address onBehalfOf) private {
         uint256 dscBalance = s_DSCMinted[onBehalfOf];
         if (amountDscToBurn > dscBalance) {
             revert DSCEngine__BurningAmountOfDscIsExceed();
         }
         s_DSCMinted[onBehalfOf] -= amountDscToBurn;
         totalTokensBurned += amountDscToBurn;
-        i_dsc.approve(address(this),amountDscToBurn);
-        bool success = i_dsc.transferFrom(dscFrom, address(this), amountDscToBurn);
+        s_DSCBurned[onBehalfOf] += amountDscToBurn;
+        bool success = i_dsc.transferFrom(onBehalfOf, address(this), amountDscToBurn);
         if (!success) {
             revert DSCEngine__TransferFailed();
         }
@@ -217,8 +222,8 @@ contract DSCEngine is ReentrancyGuard {
         if (to == address(0) || !success) {
             revert DSCEngine__TransferFailed();
         }
-        s_DSCMinted[msg.sender] -= dscAmountToTransfer;
-        s_DSCMinted[to] += dscAmountToTransfer;
+        s_transferedBySender[msg.sender] += dscAmountToTransfer;
+        s_receivedByReceiver[to] += dscAmountToTransfer;
     }
 
     /* ----------------------------- Helper Functions ---------------------------- */
@@ -284,8 +289,8 @@ contract DSCEngine is ReentrancyGuard {
         uint256 totalCollateralValue = 0;
         for (uint256 i = 0; i < s_usersArrayMemory.length; i++) {
             for (uint256 j = 0; j < s_collateralTokensMemory.length; j++) {
-                uint256 collateralamount = s_collateralDeposited[s_usersArrayMemory[i]][s_collateralTokensMemory[i]];
-                totalCollateralValue += getUsdValue(s_collateralTokensMemory[i], collateralamount);
+                uint256 collateralamount = s_collateralDeposited[s_usersArrayMemory[i]][s_collateralTokensMemory[j]];
+                totalCollateralValue += getUsdValue(s_collateralTokensMemory[j], collateralamount);
             }
         }
         return totalCollateralValue;
@@ -298,8 +303,24 @@ contract DSCEngine is ReentrancyGuard {
         // return value is in ethers form
     }
 
+    function getBurnedUserDetails(address user) external view returns (uint256) {
+        return s_DSCBurned[user];
+    }
+    
+    function getTotalTransferedBySender(address user) external view returns (uint256) {
+        return s_transferedBySender[user];
+    }
+
+    function getTotalReceivedByReceiver(address user) external view returns (uint256) {
+        return s_receivedByReceiver[user];
+    }
+
     function getCollateralTokens() external view returns (address[] memory) {
         return s_collateralTokens;
+    }
+
+    function getUsersArray() external view returns (address[] memory) {
+        return s_usersArray;
     }
 
     function getCollateralDeposited(address userAddress, address collateralAddress) external view returns (uint256) {
@@ -318,19 +339,15 @@ contract DSCEngine is ReentrancyGuard {
         return s_priceFeeds[token];
     }
 
-    function getHealthFactor(address user) external view returns (uint256) {
-        return _healthFactor(user);
-    }
-
     function getTotalTokensOnMarket() external view returns (uint256) {
-        return totalTokensMinted - totalTokensBurned;
+        return getTotalTokensMinted() - getTotalTokensBurned();
     }
 
-    function getTotalTokensMinted() external view returns (uint256) {
+    function getTotalTokensMinted() public view returns (uint256) {
         return totalTokensMinted;
     }
 
-    function getTotalTokensBurned() external view returns (uint256) {
+    function getTotalTokensBurned() public view returns (uint256) {
         return totalTokensBurned;
     }
 }
