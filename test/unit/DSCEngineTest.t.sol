@@ -129,29 +129,29 @@ contract DSCEngineTest is StdCheats, Test {
         // => 999992592647461870 > 1000000000000000000 => false
         // here we deposit 270,000 $ value of collateral, by calculating thresold we can only mint 13500 tokens
         // if we try to mint 135001 tokens the health factor is broken
-        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, expectedHealthFactor));// 999992592647461870
-        dsce.mintDsc(135001);  
+        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, expectedHealthFactor)); // 999992592647461870
+        dsce.mintDsc(135001);
         vm.stopPrank();
     }
 
     /* testing helper functions */
     function test_DscAdddress() public {
-        assertEq(dsce.getDsc(),address(dsc));
+        assertEq(dsce.getDsc(), address(dsc));
     }
 
     /* Deposting and minting tokens for testing correct data */
     function test_depositingAndMintingFunctions() public {
         uint256 beforeCollateralValueInUsd = 0;
         assertEq(dsce.getTotalCollateralValueInUsd(), beforeCollateralValueInUsd);
-        
+
         uint256 user1CollateralValue = 270000;
-        vm.startPrank(user1);  // depositing collateral value of 270,000$ by user1
-        depositCollateralAmount(10);  // 20000 + 250000 = 270000$ USD
+        vm.startPrank(user1); // depositing collateral value of 270,000$ by user1
+        depositCollateralAmount(10); // 20000 + 250000 = 270000$ USD
         vm.stopPrank();
 
         uint256 user2CollateralValue = 135000;
         vm.startPrank(user2); // depositing collateral value of 135,000$ by user2
-        depositCollateralAmount(5);  // 10000 + 125000 = 135000$ USD
+        depositCollateralAmount(5); // 10000 + 125000 = 135000$ USD
         vm.stopPrank();
 
         uint256 afterCollateralValueInUsd = user1CollateralValue + user2CollateralValue;
@@ -185,12 +185,25 @@ contract DSCEngineTest is StdCheats, Test {
         vm.startPrank(user2);
         // approving our DscEngine contract to burn the tokens
         DecentralizedStableCoin(dsc).approve(address(dsce), amountToMint);
+
         depositCollateralAmount(2);
+        uint256 beforeMinting = dsce.getDSCMinted(user2);
+        uint256 expectedBeforeMinting = 0;
+        assertEq(beforeMinting, expectedBeforeMinting);
+
         dsce.mintDsc(amountToMint);
-        uint256 healthFactorBeforeBurning = dsce._healthFactor(user2);  // low health factor
+        uint256 afterMinting = dsce.getDSCMinted(user2);
+        uint256 expectedAfterMinting = amountToMint; // 1000 tokens are minted
+        assertEq(afterMinting, expectedAfterMinting);
+
+        uint256 healthFactorBeforeBurning = dsce._healthFactor(user2); // low health factor
         // burning the tokens
         dsce.burnDsc(amountToBurn);
-        uint256 healthFactorAfterBurning = dsce._healthFactor(user2);  // high health factor
+        uint256 healthFactorAfterBurning = dsce._healthFactor(user2); // high health factor
+
+        uint256 afterBurning = dsce.getDSCMinted(user2);
+        uint256 expectedAfterBurning = amountToMint - amountToBurn;
+        assertEq(afterBurning, expectedAfterBurning);
         vm.stopPrank();
 
         assertEq(dsce.getTotalTokensBurned(), amountToBurn);
@@ -200,20 +213,89 @@ contract DSCEngineTest is StdCheats, Test {
         assertLt(healthFactorBeforeBurning, healthFactorAfterBurning);
     }
 
+    /* Test redeem function */
     function test_redeemCollateralFunction() public {
         vm.startPrank(user1);
         depositCollateralAmount(10); // 270000$ USD
         uint256 collateralValueBeforeRedeem = dsce.getAccountCollateralValue(user1);
         uint256 beforeHealthFactor = dsce._healthFactor(user1);
 
-        dsce.redeemCollateral(address(weth), 5);  // 270000 - 10000 = 260000$ USD
+        dsce.redeemCollateral(address(weth), 5); // 270000 - 5(2000) = 260000$ USD
         uint256 afterHealthFactor = dsce._healthFactor(user1);
         uint256 collateralValueAfterRedeem = dsce.getAccountCollateralValue(user1);
         uint256 amountToCover = 10000;
 
         assertEq(collateralValueBeforeRedeem, collateralValueAfterRedeem + amountToCover);
-        assertEq(beforeHealthFactor, afterHealthFactor);  
+        assertEq(beforeHealthFactor, afterHealthFactor);
         // here both are same because we do not mint any tokens to change the health factor
+        vm.stopPrank();
+    }
+
+    /* Test redeem by burning Dsc function */
+    function test_redeemCollateralForDsc() public {
+        uint256 expectedHealthFactor = type(uint256).max;
+        uint256 expectedCollateralValueInUsd = 0;
+
+        vm.startPrank(user1);
+        uint256 beforeDepositingCollateralValueInUsd = dsce.getAccountCollateralValue(user1);
+        assertEq(beforeDepositingCollateralValueInUsd, expectedCollateralValueInUsd);
+
+        depositCollateralAmount(10); // 270000$ USD
+        uint256 beforeMintingCollateralValueInUsd = dsce.getAccountCollateralValue(user1);
+        uint256 beforeHealthFactor = dsce._healthFactor(user1); // max(uint256)
+        expectedCollateralValueInUsd = 270000;
+        assertEq(beforeMintingCollateralValueInUsd, expectedCollateralValueInUsd);
+        assertEq(beforeHealthFactor, expectedHealthFactor);
+
+        uint256 dscMintedAmount = 5000;
+
+        /// minting 5000 dsc
+        uint256 amountToBurn = 1000; // burning 1000 dsc
+        dsce.mintDsc(dscMintedAmount);
+
+        uint256 afterMintingCollateralValueInUsd = dsce.getAccountCollateralValue(user1);
+        uint256 afterMintingHealthFactor = dsce._healthFactor(user1);
+        // (27000 * 50 * 1e18)/(100 * 5000) = 27000000000000000000
+        expectedHealthFactor = 27000000000000000000;
+        expectedCollateralValueInUsd = 270000; // after minting also the collateral value is not changes
+        assertEq(afterMintingCollateralValueInUsd, expectedCollateralValueInUsd);
+        assertEq(afterMintingHealthFactor, expectedHealthFactor);
+
+        // approving our DscEngine contract to burn the tokens
+        DecentralizedStableCoin(dsc).approve(address(dsce), amountToBurn);
+
+        dsce.redeemCollateralForDsc(address(weth), 5, amountToBurn);
+        // we returned back of 10000$ value of WETH, remaining collateral = 270000 - 10000 = 260000
+        uint256 afterRedeemCollateralValueInUsd = dsce.getAccountCollateralValue(user1);
+        expectedCollateralValueInUsd = 260000;
+        assertEq(afterRedeemCollateralValueInUsd, expectedCollateralValueInUsd);
+
+        // here i am redeeming 5-WETH tokens by burning 1000 DSC tokens
+        // I havve redeem 5-WETH which cost of 1000$, so we the total collatedral value in usd is 26000
+        // after burning 1000 DSC tokens i have to check health factor for 5000 - 1000 = 4000 tokens
+
+        // (26000 * 50 * 1e18)/(100 * 4000) = 32500000000000000000
+        uint256 afterRedeemHealthFactor = dsce._healthFactor(user1);
+        expectedHealthFactor = 32500000000000000000;
+        assertEq(afterRedeemHealthFactor, expectedHealthFactor);
+        vm.stopPrank();
+    }
+
+    /* Testing for depositing Collateral And MintDsc at a single call */
+    function test_depositCollateralAndMintDsc() public {
+        uint256 collateralAmount = 10;
+        uint256 amountToMint = 5000;
+
+        vm.startPrank(user1);
+        // depositing colateral of amount of 10 * 2000 = 20000$ value of WETH
+        // and minting of 5000 DSC tokens
+        ERC20Mock(weth).approve(address(dsce), collateralAmount);
+        dsce.depositCollateralAndMintDsc(weth, collateralAmount, amountToMint);
+        // checking health factor = (20000 * 50 * 1e18)/(100 * 5000) = 2000000000000000000
+        uint256 expectedHealthFactor = 2000000000000000000;
+        uint256 healthFactor = dsce._healthFactor(user1);
+
+        assertEq(expectedHealthFactor, healthFactor);
         vm.stopPrank();
     }
 }
