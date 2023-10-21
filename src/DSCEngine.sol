@@ -54,9 +54,6 @@ contract DSCEngine is ReentrancyGuard {
     mapping(address user => uint256 amount) private s_DSCMinted;
     // Amount of DSC burned by user
     mapping(address user => uint256 amount) private s_DSCBurned;
-    // address of all users who get the DSC tokens by transfering
-    mapping(address user => uint256 amount) private s_transferedBySender;
-    mapping(address user => uint256 amount) private s_receivedByReceiver;
     // token collateral(weth/wbtc) coins addresses
     address[] private s_collateralTokens;
     // address of all users
@@ -147,7 +144,7 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant
     {
         _redeemCollateral(tokenCollateralAddress, amountCollateral, msg.sender, msg.sender);
-        // _redeemcolleteral function already checks the healthFactor, no need to check again
+        // _redeemcolleteral function. already checks the healthFactor, no need to check again
     }
 
     function _redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral, address from, address to)
@@ -207,31 +204,12 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    /* ---------------------------- Transfer DSC Function ------------------------ */
-
-    function transferDsc(address to, uint256 dscAmountToTransfer)
-        external
-        moreThanZero(dscAmountToTransfer)
-        nonReentrant
-    {
-        _transferDsc(to, dscAmountToTransfer);
-    }
-
-    function _transferDsc(address to, uint256 dscAmountToTransfer) private {
-        bool success = i_dsc.transfer(to, dscAmountToTransfer);
-        if (to == address(0) || !success) {
-            revert DSCEngine__TransferFailed();
-        }
-        s_transferedBySender[msg.sender] += dscAmountToTransfer;
-        s_receivedByReceiver[to] += dscAmountToTransfer;
-    }
-
     /* ----------------------------- Helper Functions ---------------------------- */
 
-    function revertIfHealthFactorIsBroken(address user) internal view {
+    function revertIfHealthFactorIsBroken(address user) private view {
         uint256 userHealthFactor = _healthFactor(user);
         if (userHealthFactor < MIN_HEALTH_FACTOR) {
-            // 1e18
+            // userHealthFactor => 1e18
             revert DSCEngine__BreaksHealthFactor(userHealthFactor);
         }
     }
@@ -242,7 +220,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd)
-        internal
+        private
         pure
         returns (uint256)
     {
@@ -305,14 +283,6 @@ contract DSCEngine is ReentrancyGuard {
 
     function getBurnedUserDetails(address user) external view returns (uint256) {
         return s_DSCBurned[user];
-    }
-    
-    function getTotalTransferedBySender(address user) external view returns (uint256) {
-        return s_transferedBySender[user];
-    }
-
-    function getTotalReceivedByReceiver(address user) external view returns (uint256) {
-        return s_receivedByReceiver[user];
     }
 
     function getCollateralTokens() external view returns (address[] memory) {
